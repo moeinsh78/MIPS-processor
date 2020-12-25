@@ -1,47 +1,116 @@
 `timescale 1ns/1ns
-module controller(input [5:0]opcode,func,input zero,output reg RegDst,WrSel,WdSel,ALUsrc,MemtoReg,MemWrite,MemRead,JSel,JrSel,RegWrite,PCsrc,output reg[2:0]ALUoperation);
+module controller(input clk, init,input [5:0]opcode,func,input zero,output reg IorD,IRwrite,PCwrite,RegDst,WrSel,WdSel,RegWrite,ALUsrcA,MemtoReg,MemWrite,MemRead,Brflag,PCWriteCond,output reg [1:0] ALUsrcB , PCsrc,output reg[2:0]ALUoperation);
   reg [2:0]ALUop;
-  reg Branch;
-  always @(opcode)begin
-    {RegDst,WrSel,WdSel,RegWrite,ALUsrc,MemtoReg,MemWrite,MemRead,JSel,JrSel,Branch}=11'b00000000000;
+  reg [3:0] ns,ps;
+  parameter [3:0] IF=4'b0000 , ID = 4'b0001 , RT=4'b0010 , RT2=4'b0011 , MemRef=4'b0100 , LW=4'b0101 , LW2=4'b0110 , SW=4'b0111 , BR=4'b1000 , J=4'b1001 , ADDi=4'b1010 , I=4'b1011 , ANDi =4'b1100 , JAL=4'b1101 , JR=4'b1110;
+  always @(ps , opcode,zero)begin
+    ns = 4'b0000;
+    {IorD,IRwrite,PCwrite,RegDst,WrSel,WdSel,RegWrite,ALUsrcA,MemtoReg,MemWrite,MemRead,Brflag,PCWriteCond}=13'b0000000000000;
     ALUop = 3'b000;
-    case (opcode)
-      6'b000000 :begin
-        {RegDst,WrSel,WdSel,RegWrite,ALUsrc,MemtoReg,MemWrite,MemRead,JSel,JrSel,Branch}=11'b10110000000;
+    PCsrc = 2'b00;
+    ALUsrcB = 2'b00;
+    case (ps)
+      IF :begin
+        {IorD,MemRead,IRwrite,ALUsrcA,PCwrite}=5'b01101;
+        PCsrc=2'b00;
+        ALUsrcB=2'b01;
+        ALUop = 3'b000;
+        ns = ID;
+      end
+      ID :begin
+        ALUsrcA = 1'b0;
+        ALUsrcB = 2'b11;
+        ALUop = 3'b000;
+        case (opcode)
+          6'b000000 : ns=RT;
+          6'b100011 : ns=MemRef; //lw
+          6'b101011 : ns=MemRef; //sw
+          6'b000010 : ns=J;
+          6'b000011 : ns=JAL;
+          6'b111111 : ns=JR;
+          6'b000100 : ns=BR; //beq
+          6'b000101 : ns=BR; //bne
+          6'b001000 : ns=ADDi;
+          6'b001100 : ns=ANDi;
+        endcase
+      end
+      RT :begin
+        ALUsrcA = 1'b1;
+        ALUsrcB = 2'b00;
         ALUop = 3'b010;
+        ns = RT2;
       end
-      6'b100011:begin
-        {RegDst,WrSel,WdSel,RegWrite,ALUsrc,MemtoReg,MemWrite,MemRead,JSel,JrSel,Branch}=11'b00111101000;
+      RT2 :begin
+       {RegDst,WrSel,MemtoReg,WdSel,RegWrite}=5'b10001;
+       ns = IF;
+      end
+      MemRef :begin
+        ALUsrcA = 1'b1;
+        ALUsrcB = 2'b10;
         ALUop = 3'b000;
+        if(opcode == 6'b100011) ns = LW;
+        if(opcode == 6'b101011) ns = SW;
       end
-      6'b101011:begin
-       {RegWrite,ALUsrc,MemWrite,MemRead,JSel,JrSel,Branch}=7'b0110000;
-        ALUop = 3'b000;
+      LW :begin
+        {IorD,MemRead}=2'b11;
+        ns = LW2;
       end
-      6'b000010 :begin
-       {RegWrite,MemWrite,MemRead,JSel,JrSel,Branch}=6'b000100;
+      LW2 :begin
+       {MemtoReg,WdSel,RegWrite,RegDst,WrSel}=5'b10100;
+        ns = IF;
       end
-      6'b000011 :begin
-       {WrSel,WdSel,RegWrite,JSel,JrSel,Branch}=6'b101100;
+      SW :begin
+        {IorD,MemWrite}=2'b11;
+        ns = IF;
       end
-      6'b111111 :begin
-        {RegWrite,MemWrite,MemRead,JrSel,Branch}=5'b00010;
+      J :begin
+        PCsrc = 2'b10;
+        PCwrite = 1'b1;
+        ns = IF;
       end
-      6'b000100 :begin
-       {RegWrite,ALUsrc,MemWrite,MemRead,JSel,JrSel,Branch}=7'b0000001;
+      BR :begin
+        ALUsrcA = 1'b1;
+        ALUsrcB = 2'b00;
         ALUop = 3'b001;
+        PCsrc = 2'b01;
+        PCWriteCond =1'b1;
+        if(opcode == 6'b000100)begin
+          if(zero == 1'b1) begin
+            Brflag = 1'b1;
+          end
+        end
+        if(opcode == 6'b000101)begin
+          if(zero == 1'b0) begin
+            Brflag = 1'b1;
+          end
+        end
+        ns = IF;
       end
-      6'b000101 :begin
-       {RegWrite,ALUsrc,MemWrite,MemRead,JSel,JrSel,Branch}=7'b0000001;
-        ALUop = 3'b001;
-      end
-      6'b001000 :begin
-       {RegDst,WrSel,WdSel,RegWrite,ALUsrc,MemtoReg,MemWrite,MemRead,JSel,JrSel,Branch}=11'b00111000000;
+      ADDi :begin
+        ALUsrcA =1'b1;
+        ALUsrcB = 2'b10;
         ALUop = 3'b011;
+        ns = I;
       end
-      6'b001100 :begin
-       {RegDst,WrSel,WdSel,RegWrite,ALUsrc,MemtoReg,MemWrite,MemRead,JSel,JrSel,Branch}=11'b00111000000;
+      ANDi :begin
+        ALUsrcA = 1'b1;
+        ALUsrcB = 2'b10;
         ALUop = 3'b100;
+        ns = I;
+      end
+      I :begin
+        {MemtoReg,WdSel,RegWrite,RegDst,WrSel}=5'b00100;
+        ns = IF;
+      end
+      JAL :begin
+        {WrSel,WdSel,RegWrite,PCwrite}=4'b1111;
+        PCsrc=2'b10;
+        ns = IF;
+      end
+      JR :begin
+        PCsrc=2'b11;
+        PCwrite = 1'b1;
+        ns = IF;
       end
     endcase
   end
@@ -69,13 +138,9 @@ module controller(input [5:0]opcode,func,input zero,output reg RegDst,WrSel,WdSe
       end 
     endcase
   end
-  always@(Branch,opcode,zero)begin
-    PCsrc = 1'b0;
-    if(Branch == 1'b0) PCsrc = 1'b0;
-    else begin
-      if(opcode == 6'b000100)PCsrc = zero;
-      if(opcode == 6'b000101)PCsrc = ~zero;
-    end
+  always @(posedge clk)begin
+    if(init) ps<=IF;
+    else ps<=ns;
   end
 endmodule
 
